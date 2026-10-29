@@ -47,9 +47,11 @@ A fork of a fork — three remotes, three jobs:
 | --- | --- | --- |
 | `origin` | `BetaCat76/cloudcli` | Your fork. The only push target (`remote.pushDefault`); forks inherit neither tags nor releases. |
 | `upstream` | `iazrael/cloudcli` | Fork parent and the v2.x line this project ships. Releases and v2.x tags live here — run `git fetch upstream --tags` after each release, or `git describe` and `git log <last-tag>..HEAD` drift. |
-| `siteboon` | `siteboon/claudecodeui` | Root project (v1.37.x). Upstream features and `docs/architecture/` arrive through merges from here; fetch only. |
+| `siteboon` | `siteboon/claudecodeui` | Root project (v1.37.x). Read-only reference: never take commits from it on your own. |
 
 `upstream` and `siteboon` are read-only from this checkout: push rights stop at `origin`.
+
+**Never pull, merge, cherry-pick, rebase onto, or otherwise import commits from the root project (`siteboon`) unless the user asks for it explicitly.** That line is not ours to consume: the root's commits enter this repo only after `iazrael/cloudcli` has merged them, and this checkout then takes them from `upstream`. A local `siteboon` fetch exists for reading its code and docs, nothing more. If a task seems to need a root commit, stop and ask the user instead of importing it.
 
 ## Release pipeline
 
