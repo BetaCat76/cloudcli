@@ -46,10 +46,10 @@ A fork of a fork — three remotes, three jobs:
 | Remote | Repository | Role |
 | --- | --- | --- |
 | `origin` | `BetaCat76/cloudcli` | Your fork. The only push target (`remote.pushDefault`); forks inherit neither tags nor releases. |
-| `upstream` | `iazrael/cloudcli` | Fork parent and the v2.x line this project ships. Releases and v2.x tags live here — run `git fetch upstream --tags` after each release, or `git describe` and `git log <last-tag>..HEAD` drift. |
+| `upstream` | `iazrael/cloudcli` | Fork parent this project was built from (the v2.x line). Its tags are the version history: run `git fetch upstream --tags` so `git describe` and `git log <last-tag>..HEAD` stay correct. Not ours to write to. |
 | `siteboon` | `siteboon/claudecodeui` | Root project (v1.37.x). Read-only reference: never take commits from it on your own. |
 
-`upstream` and `siteboon` are read-only from this checkout: push rights stop at `origin`.
+`upstream` and `siteboon` are read-only from this checkout: push rights stop at `origin`, and neither repository belongs to this fork's owner — never perform a push, tag, release, issue, or PR action against them. This fork publishes **no GitHub Release**: the annotated tag pushed to `origin` is its release record, so `gh` and its release commands are not part of any workflow here.
 
 **Never pull, merge, cherry-pick, rebase onto, or otherwise import commits from the root project (`siteboon`) unless the user asks for it explicitly.** That line is not ours to consume: the root's commits enter this repo only after `iazrael/cloudcli` has merged them, and this checkout then takes them from `upstream`. A local `siteboon` fetch exists for reading its code and docs, nothing more. If a task seems to need a root commit, stop and ask the user instead of importing it.
 
@@ -62,9 +62,9 @@ Saying "发布/发版本" (release a version) means running this whole pipeline 
 3. `git commit --no-verify -m "chore(release): bump version to X.Y.Z"`, scoped to exactly those three files.
 4. `git tag -a vX.Y.Z -m "CloudCLI X.Y.Z"` (annotated, before any build).
 5. Build and deploy **from a clean worktree of the tag** — the main tree is routinely dirtied by parallel sessions, which bakes `-dirty` into the build fingerprint: `git worktree add --detach /tmp/rel-vX.Y.Z vX.Y.Z`, `cp -Rc node_modules /tmp/rel-vX.Y.Z/` (the repo has no pnpm-lock, so `pnpm install` there fails), then build in the worktree and verify the fingerprint is `vX.Y.Z-<hash>` without `-dirty`.
-6. `git push origin main --follow-tags` (tags land on the fork, not on `upstream`), then `gh release create vX.Y.Z -R iazrael/cloudcli --title "CloudCLI X.Y.Z" --notes-file ...` — always pass `-R`, because `gh` would otherwise target `origin` while releases belong on `upstream`; the tag must exist there too, so a checkout that cannot push to `iazrael/cloudcli` stops after the push and hands the release over.
+6. `git push origin main --follow-tags`: the annotated tag on the fork is the release record. Do not create a GitHub Release (no `gh release`), and do not push, tag, or publish anything on `upstream` or `siteboon` — neither repository belongs to this fork's owner.
 7. Stop before the restart-producing deploy step. Tell the user to run `node scripts/deploy.mjs` from the worktree themselves; non-interactive shells need `PATH="$HOME/Library/pnpm:$PATH" PNPM_HOME="$HOME/Library/pnpm"` so pnpm and the stable global CLI entry are available. Resume verification only after the user confirms it completed.
-8. Verify four things: pm2 online with the new version, `curl http://localhost:3030/` returns 200, the fixed runtime's `dist/assets/*.js` fingerprint has no `-dirty`, and `gh release view` confirms the release.
+8. Verify four things: pm2 online with the new version, `curl http://localhost:3030/` returns 200, the fixed runtime's `dist/assets/*.js` fingerprint has no `-dirty`, and `git ls-remote origin refs/tags/vX.Y.Z` confirms the tag reached the fork.
 
 ## Parallel development worktrees
 
