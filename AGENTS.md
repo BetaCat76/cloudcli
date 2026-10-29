@@ -39,6 +39,18 @@ Use PM2 commands when inspecting the server process, rather than ad-hoc backgrou
 **Important Note on Server Restarts**:
 Restarting PM2 abruptly drops the live websocket/HTTP connection. The agent must not execute `pm2 restart`, `pnpm run deploy`, or any indirect restart mechanism, even after warning the user. When a restart is needed, report the exact command and reason, then wait for the user to run it and confirm completion before resuming work.
 
+## Remotes and upstream lineage
+
+A fork of a fork — three remotes, three jobs:
+
+| Remote | Repository | Role |
+| --- | --- | --- |
+| `origin` | `BetaCat76/cloudcli` | Your fork. The only push target (`remote.pushDefault`); forks inherit neither tags nor releases. |
+| `upstream` | `iazrael/cloudcli` | Fork parent and the v2.x line this project ships. Releases and v2.x tags live here — run `git fetch upstream --tags` after each release, or `git describe` and `git log <last-tag>..HEAD` drift. |
+| `siteboon` | `siteboon/claudecodeui` | Root project (v1.37.x). Upstream features and `docs/architecture/` arrive through merges from here; fetch only. |
+
+`upstream` and `siteboon` are read-only from this checkout: push rights stop at `origin`.
+
 ## Release pipeline
 
 Saying "发布/发版本" (release a version) means running this whole pipeline unattended, in this exact order — the tag must exist before the build, or the sidebar version string drifts:
@@ -48,7 +60,7 @@ Saying "发布/发版本" (release a version) means running this whole pipeline 
 3. `git commit --no-verify -m "chore(release): bump version to X.Y.Z"`, scoped to exactly those three files.
 4. `git tag -a vX.Y.Z -m "CloudCLI X.Y.Z"` (annotated, before any build).
 5. Build and deploy **from a clean worktree of the tag** — the main tree is routinely dirtied by parallel sessions, which bakes `-dirty` into the build fingerprint: `git worktree add --detach /tmp/rel-vX.Y.Z vX.Y.Z`, `cp -Rc node_modules /tmp/rel-vX.Y.Z/` (the repo has no pnpm-lock, so `pnpm install` there fails), then build in the worktree and verify the fingerprint is `vX.Y.Z-<hash>` without `-dirty`.
-6. `git push origin main --follow-tags`, then `gh release create vX.Y.Z -R iazrael/cloudcli --title "CloudCLI X.Y.Z" --notes-file ...` — always pass `-R`; gh defaults to the upstream repo.
+6. `git push origin main --follow-tags` (tags land on the fork, not on `upstream`), then `gh release create vX.Y.Z -R iazrael/cloudcli --title "CloudCLI X.Y.Z" --notes-file ...` — always pass `-R`, because `gh` would otherwise target `origin` while releases belong on `upstream`; the tag must exist there too, so a checkout that cannot push to `iazrael/cloudcli` stops after the push and hands the release over.
 7. Stop before the restart-producing deploy step. Tell the user to run `node scripts/deploy.mjs` from the worktree themselves; non-interactive shells need `PATH="$HOME/Library/pnpm:$PATH" PNPM_HOME="$HOME/Library/pnpm"` so pnpm and the stable global CLI entry are available. Resume verification only after the user confirms it completed.
 8. Verify four things: pm2 online with the new version, `curl http://localhost:3030/` returns 200, the fixed runtime's `dist/assets/*.js` fingerprint has no `-dirty`, and `gh release view` confirms the release.
 
