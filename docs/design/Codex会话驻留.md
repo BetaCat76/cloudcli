@@ -1,7 +1,7 @@
 # Codex 会话驻留
 
 > 状态：驻留默认开启；会话活动带出"在等引擎"这一档，页面区分等待与干活；真实后台汇报与辅助线程隔离仍待真实账号验收，产品评审已提出容量回退、停止确认与排队消息可见性的后续项
-> 基准：2.10.0 / 2026-10-20；仓库依赖 `@openai/codex` 0.163.0，上游标签 `rust-v0.163.0`
+> 基准：2.16.0 / 2026-10-30；仓库依赖 `@openai/codex` 0.165.0，上游标签 `rust-v0.165.0`
 
 ## 目标与实施顺序
 
@@ -21,7 +21,7 @@
 
 本机用仓库包内版本做过隔离实测。探针使用临时 `CODEX_HOME`、临时工作目录和独立线程，只复制登录所需的认证文件，结束后删除临时数据。模型采用接口返回的默认模型，工具关闭。没有操作生产聊天或重启生产服务。
 
-前置验证的可复跑探针是 `scripts/probe/codex-turn-race.probe.mjs`：驱动包内真实 app-server，上游指向本地假模型端点，临时 `HOME` 与 `CODEX_HOME`，不碰真实账号与生产聊天。它既发请求也读上游收到的请求体，因此能判断输入是否真的被并入正在跑的回合；上游由本地 HTTP 服务模拟并可保持请求未完成，用来把回合停在进行中。上游 0.163.0 源码（标签 `rust-v0.163.0`）与包内协议导出一致：`codex-rs/app-server/src/request_processors/turn_processor.rs` 里 `turn/start` 走 `start_or_steer_turn`，新建和并入都返回 `status: InProgress`，响应里没有区分两者的字段；`codex-rs/core/src/session/turn_input.rs` 里的 `start_if_idle` 才是原子空闲判定，忙时返回 `NotIdle`；`codex-rs/ext/queue/src/service.rs` 的队列扩展在 `on_thread_idle` 时排空队列，每条排队输入单独起一个回合。
+前置验证的可复跑探针是 `scripts/probe/codex-turn-race.probe.mjs`：驱动包内真实 app-server，上游指向本地假模型端点，临时 `HOME` 与 `CODEX_HOME`，不碰真实账号与生产聊天。它既发请求也读上游收到的请求体，因此能判断输入是否真的被并入正在跑的回合；上游由本地 HTTP 服务模拟并可保持请求未完成，用来把回合停在进行中。上游 0.165.0 源码（标签 `rust-v0.165.0`）与包内协议导出一致：`codex-rs/app-server/src/request_processors/turn_processor.rs` 里 `turn/start` 走 `start_or_steer_turn`，新建和并入都返回 `status: InProgress`，响应里没有区分两者的字段；`codex-rs/core/src/session/turn_input.rs` 里的 `start_if_idle` 才是原子空闲判定，忙时返回 `NotIdle`；`codex-rs/ext/queue/src/service.rs` 的队列扩展在 `on_thread_idle` 时排空队列，每条排队输入单独起一个回合。
 
 | 实测操作 | 观察结果 | 能说明什么 |
 | --- | --- | --- |
@@ -94,7 +94,7 @@ stateDiagram-v2
 
 首次运行时，管理模块创建连接、握手并 `thread/start` 或 `thread/resume`。初始化失败统一销毁连接并撤销凭证；会话在初始化中关闭后，迟到应答不能重新登记。初始化 Promise 由同一条驻留记录持有，并发借用共享它。下一轮沿用已加载线程，不重新执行连接握手和历史恢复。
 
-提交一轮分两步。先用 `thread/settings/update` 把本轮校验过的模型、推理强度、工作目录、沙箱与审批策略写到线程上；0.163.0 里 `turn/start` 的这些覆盖项本身就是“本轮及后续回合”生效，与线程设置同义。再用 `thread/queue/add` 提交输入，带宿主生成的 `clientUserMessageId`。队列是引擎的准入闸门：线程忙时输入留在队列里，线程空闲时引擎自己把队列排空并为每条输入起独立回合。宿主不再直接 `turn/start`，也就不会把输入并进引擎自发回合。
+提交一轮分两步。先用 `thread/settings/update` 把本轮校验过的模型、推理强度、工作目录、沙箱与审批策略写到线程上；0.165.0 里 `turn/start` 的这些覆盖项本身就是“本轮及后续回合”生效，与线程设置同义。再用 `thread/queue/add` 提交输入，带宿主生成的 `clientUserMessageId`。队列是引擎的准入闸门：线程忙时输入留在队列里，线程空闲时引擎自己把队列排空并为每条输入起独立回合。宿主不再直接 `turn/start`，也就不会把输入并进引擎自发回合。
 
 每轮保留独立的 writer、原生 turn id、权限上下文、终态等待和取消意图。原生 id 只来自 `turn/started`：排空发生在该通知之前，队列项的删除发生在之后，两者之间有窗口。宿主按队列项是否已被消费判定这一回合属于自己还是引擎自发汇报；判定未落定前，该回合的事件按目标线程暂存，确认身份后按顺序处理。两种判定互相冲突时结束为状态不明，不能把两轮揉成一轮。
 
@@ -150,7 +150,7 @@ stateDiagram-v2
 
 ## 模型、权限与宿主任务授权
 
-下一轮的模型、推理强度、工作目录和沙箱按已经校验的本轮选项下发，写入 `thread/settings/update`；不能只修改本地选择器后继续使用旧配置。0.163.0 里 `turn/start` 的这些覆盖项本身就是“本轮及后续回合”生效，与线程设置同义，所以改走队列不会丢掉设置。协议里沙箱有两种形状：线程取模式字符串（`workspace-write` / `danger-full-access`），回合取按 `type` 标记的策略对象；把策略对象发给 `thread/start` 会被引擎静默忽略，权限模式和实际生效的就不一致了。不支持在线更改的启动设置进入兼容性判定，包括认证来源、模型提供方、MCP 配置和环境。配置不兼容时，空闲会话可以换进程；仍有后台工作的会话先报告阻塞条件，不能悄悄杀掉工作完成切换。
+下一轮的模型、推理强度、工作目录和沙箱按已经校验的本轮选项下发，写入 `thread/settings/update`；不能只修改本地选择器后继续使用旧配置。0.165.0 里 `turn/start` 的这些覆盖项本身就是“本轮及后续回合”生效，与线程设置同义，所以改走队列不会丢掉设置。协议里沙箱有两种形状：线程取模式字符串（`workspace-write` / `danger-full-access`），回合取按 `type` 标记的策略对象；把策略对象发给 `thread/start` 会被引擎静默忽略，权限模式和实际生效的就不一致了。不支持在线更改的启动设置进入兼容性判定，包括认证来源、模型提供方、MCP 配置和环境。配置不兼容时，空闲会话可以换进程；仍有后台工作的会话先报告阻塞条件，不能悄悄杀掉工作完成切换。
 
 权限收紧尤其需要核对既有后台任务。旧代理保持原有授权快照，不能因为父线程下一轮改了权限就获得新权限。不能证明新回合已按要求收紧时，拒绝在旧进程继续发送。模型切换和权限切换分别测试，不把普通同模型连续对话视为验证。
 
@@ -158,7 +158,7 @@ stateDiagram-v2
 
 采用按实际工具调用定位本轮授权的内部桥接。包内 Codex 在 MCP `tools/call` 的 `_meta` 中提供原生调用身份。CloudCLI 的 MCP 读取这份协议元数据，经专用内部入口请求宿主执行任务操作。宿主用已经观测到的引擎调用核对元数据，定位网关批准的运行，再调用 task-continuations 的登记、查询和取消通知逻辑。用户、应用会话、目录与沙箱仍从可信运行快照取得，工具参数不能提供或覆盖这些身份。
 
-元数据中的 `x-codex-turn-metadata` 提供原生 thread id 和 turn id；`callId` 对应 app-server `mcpToolCall` 项的 id。外层 `itemId` 是另一种标识，不能拿来代替这个调用 id。隔离探针确认了这组对应关系；上游 [`mcp_tool_call.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/core/src/mcp_tool_call.rs) 的 `build_mcp_tool_call_request_meta` 提供元数据构造依据。实现必须校验实际字段和协议版本，不能把工具参数里同名的字符串当作可信身份。
+元数据中的 `x-codex-turn-metadata` 提供原生 thread id 和 turn id；`callId` 对应 app-server `mcpToolCall` 项的 id。外层 `itemId` 是另一种标识，不能拿来代替这个调用 id。隔离探针确认了这组对应关系；上游 [`mcp_tool_call.rs`](https://github.com/openai/codex/blob/rust-v0.165.0/codex-rs/core/src/mcp_tool_call.rs) 的 `build_mcp_tool_call_request_meta` 提供元数据构造依据。实现必须校验实际字段和协议版本，不能把工具参数里同名的字符串当作可信身份。
 
 连接启动时只给受控 MCP 一枚窄范围的桥接凭证，绑定可信用户、应用会话和进程代次，通过环境传入。凭证单独持有时没有登记、查询或取消任务的权限，必须同时命中宿主的实际调用记录。宿主只保留凭证摘要，进程销毁立即撤销；凭证不进入 shell、独立任务、模型上下文和日志。
 
