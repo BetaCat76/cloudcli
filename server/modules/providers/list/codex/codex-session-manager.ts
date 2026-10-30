@@ -29,7 +29,7 @@
  *
  * The engine does not always drain its queue by itself. After a turn is
  * interrupted it holds every queued input until a client names one with
- * `thread/queue/start` (codex-cli 0.165.0: an input queued right after
+ * `thread/queue/start` (codex-cli 0.166.0: an input queued right after
  * `turn/interrupt` was still queued 20 s later, and started at once on
  * `thread/queue/start`). Without that call, the first message after a stop
  * waits in the queue for good. So whenever the round's input is still queued
